@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcription with Real-Time Subtitles</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input[type="file"] {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        #loading {
+            display: none;
+            color: green;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        #subtitleCanvas {
+            border: 1px solid black;
+            margin-top: 20px;
+            width: 1024px;
+            height: 400px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Upload Your Audio File</h1>
+
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="file" id="audioUpload" accept="audio/*" required>
+        <button type="submit">Upload and Transcribe</button>
+    </form>
+
+    <div id="loading">Processing your audio file, please wait...</div>
+    <audio id="audioPlayer" controls disabled></audio>
+    <canvas id="subtitleCanvas" width="1024" height="400"></canvas>
+    <div id="result"></div>
+
+    <script>
+        const canvas = document.getElementById('subtitleCanvas');
+        const ctx = canvas.getContext('2d');
+        let subtitles = [];
+
+        function renderSubtitles(currentTime) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "16px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            const currentWordIndex = subtitles.findIndex(word => currentTime >= word.start && currentTime <= word.end);
+            const currentWord = subtitles[currentWordIndex];
+            const previousWords = subtitles.slice(0, currentWordIndex).map(word => word.text).join(" ");
+            const upcomingWords = subtitles.slice(currentWordIndex + 1).map(word => word.text).join(" ");
+
+            ctx.fillStyle = "gray";
+            ctx.fillText(previousWords, canvas.width / 2, canvas.height / 2 - 20);
+
+            if (currentWord) {
+                ctx.fillStyle = "green";
+                ctx.fillText(currentWord.text, canvas.width / 2, canvas.height / 2);
+            }
+
+            ctx.fillStyle = "gray";
+            ctx.fillText(upcomingWords, canvas.width / 2, canvas.height / 2 + 20);
+        }
+
+        function checkProgress() {
+            fetch('/progress')
+            .then(response => response.json())
+            .then(data => {
+                const progress = data.progress;
+                if (progress >= 0 && progress < 100) {
+                    document.getElementById('loading').innerHTML = `Processing: ${progress}%`;
+                    setTimeout(checkProgress, 1000);  // Keep checking every second
+                } else if (progress === 100) {
+                    document.getElementById('loading').innerHTML = `Transcription Complete`;
+                } else {
+                    document.getElementById('loading').innerHTML = `An error occurred.`;
+                }
+            });
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData();
+            const fileInput = document.getElementById('audioUpload');
+            const loadingText = document.getElementById('loading');
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '';
+            loadingText.style.display = 'block';
+
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/transcribe', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('result').innerHTML = `<span style="color: red;">Error: ${data.error}</span>`;
+                } else {
+                    subtitles = data; // Subtitles loaded from transcription
+                    document.getElementById('audioPlayer').src = URL.createObjectURL(fileInput.files[0]);
+                    document.getElementById('audioPlayer').disabled = false;
+                    renderSubtitles(0);  // Initial rendering
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = `<span style="color: red;">An error occurred: ${error.message}</span>`;
+            });
+
+            checkProgress();  // Start checking the progress
+        });
+
+        document.getElementById('audioPlayer').addEventListener('play', function() {
+            const audioPlayer = this;
+
+            audioPlayer.addEventListener('timeupdate', function() {
+                const currentTime = this.currentTime;
+                renderSubtitles(currentTime);
+            });
+        });
+    </script>
+
+</body>
+</html>
